@@ -94,6 +94,11 @@
     border:1px solid var(--accent); color:var(--text); padding:9px 16px; border-radius:20px; font-size:13px;
     z-index:80; opacity:0; transition:opacity .2s; pointer-events:none; }
   .toast.show { opacity:1; }
+  /* ---- debug overlay (only when ?debug=1 or #debug) ---- */
+  #dbg { display:none; }
+  body.dbg #dbg { display:block; position:fixed; left:6px; top:calc(6px + env(safe-area-inset-top));
+    z-index:90; margin:0; padding:6px 8px; background:rgba(0,0,0,.74); color:#7CFC00; border-radius:8px;
+    font:11px/1.45 ui-monospace,Menlo,Consolas,monospace; white-space:pre; pointer-events:none; max-width:76vw; }
 </style>
 </head>
 <body>
@@ -199,6 +204,7 @@
 <button id="unlock">🔊 解説の音を出す</button>
 
 <div class="toast" id="toast"></div>
+<pre id="dbg"></pre>
 
 <script src="https://www.youtube.com/iframe_api"></script>
 <script>
@@ -249,6 +255,12 @@ const ytPlayers = {};
 let ytApiReady = false, pendingRender = false;
 let audioArmed = true;   // solo/iOS: starts muted until the user taps to unlock sound
 let audioLive  = false;  // true once the intended audio source is confirmed playing with sound
+
+// ---- debug instrumentation (only active with ?debug=1 or #debug) ----
+const DEBUG = /[?&]debug=1\b/.test(location.search) || /(?:^|[#&])debug\b/.test(location.hash);
+let lastYtOp = "-";      // last YouTube/iframe operation we issued
+let unlockTapped = false;// did the user tap 🔊解説の音を出す?
+function dlog(op){ lastYtOp = op; if(DEBUG) dbgRender(); }
 
 function ytId(input){
   if(!input) return "";
@@ -320,8 +332,8 @@ function applyLag(){
     const edge=p.getDuration();           // live streams: seekable end (live position)
     if(!edge || edge<1) return;            // not a DVR/live stream yet
     const target=Math.max(0, edge-(cfg.lag||0));
-    if(Math.abs((p.getCurrentTime()||0)-target) > 1.2) p.seekTo(target,true);
-  }catch(e){}
+    if(Math.abs((p.getCurrentTime()||0)-target) > 1.2){ p.seekTo(target,true); dlog("seekTo "+Math.round(target)+"/"+Math.round(edge)); }
+  }catch(e){ dlog("ERR seek: "+e.message); }
 }
 function nudgeLag(d){
   cfg.lag=Math.min(600,Math.max(0,(cfg.lag||0)+d));
@@ -362,7 +374,7 @@ function applyAudio(){
   ["A","B"].forEach(sl=>{
     const audible=(cfg.audio===sl)&&audioArmed;
     if(cfg[sl].type==="youtube"){ const p=ytPlayers[sl];
-      if(p){ try{ if(audible){ p.unMute(); p.setVolume(100); p.playVideo(); live=true; } else p.mute(); }catch(e){} } }
+      if(p){ try{ if(audible){ p.unMute(); p.setVolume(100); p.playVideo(); live=true; dlog("unMute+play "+sl); } else { p.mute(); dlog("mute "+sl); } }catch(e){ dlog("ERR audio "+sl+": "+e.message); } } else dlog("no player "+sl+" yet"); }
     else { const f=document.querySelector("#host"+sl+" iframe");
       if(f){ const w=boatcastSrc(cfg[sl].stadium,audible); if(f.src!==w) f.src=w; if(audible) live=true; } }
   });
@@ -376,7 +388,7 @@ function refreshUnlock(){
     (effectiveSolo() && cfg.audio!=="none" && !audioLive) ? "block" : "none";
 }
 // Called inside a real tap -> unlocks iOS audio for the current source.
-function armAudio(){ audioArmed=true; applyAudio(); applyLag(); }
+function armAudio(){ unlockTapped=true; audioArmed=true; dlog("armAudio(unlock tap)"); applyAudio(); applyLag(); }
 
 function toggleAudio(slot){
   cfg.audio = (cfg.audio===slot)?"none":slot;
@@ -387,6 +399,7 @@ function toggleAudio(slot){
 function flipAudio(){
   cfg.audio = (cfg.audio==="A") ? "B" : "A";
   audioArmed = true;                 // came from a tap -> safe to unMute now
+  dlog("flipAudio -> "+cfg.audio);
   applyAudio(); applyLag(); applyLayout(); saveCfg();
 }
 function swap(){
@@ -477,6 +490,34 @@ if(effectiveSolo()){
 
 bindSettings();
 updateLagUI();
+
+// ---- debug overlay rendering ----
+function ytStateName(s){ return ({"-1":"未開始","0":"終了","1":"再生中","2":"停止","3":"buffer","5":"cued"})[String(s)] || String(s); }
+function slotInfo(sl){
+  if(cfg[sl].type==="youtube"){
+    const p=ytPlayers[sl]; if(!p) return "YT:プレイヤ無";
+    let st="?",mt="?",ct="?",du="?";
+    try{ st=ytStateName(p.getPlayerState()); }catch(e){}
+    try{ mt=p.isMuted()?"消音":"音あり"; }catch(e){}
+    try{ ct=Math.round(p.getCurrentTime()); }catch(e){}
+    try{ du=Math.round(p.getDuration()); }catch(e){}
+    return "YT "+st+"/"+mt+" t="+ct+"/"+du;
+  }
+  const f=document.querySelector("#host"+sl+" iframe");
+  return "映像 iframe="+(f?"有":"無")+(cfg.audio===sl?"/音声対象":"");
+}
+function dbgRender(){
+  const el=document.getElementById("dbg"); if(!el) return;
+  el.textContent =
+    "mode: "+(effectiveSolo()?"iPhone(solo)":"PC/2分割")+"\n"+
+    "audio希望: "+cfg.audio+"  armed:"+audioArmed+"  live:"+audioLive+"\n"+
+    "visual: "+cfg.visual+"   lag: "+(cfg.lag||0)+"s\n"+
+    "A["+cfg.A.type+"]: "+slotInfo("A")+"\n"+
+    "B["+cfg.B.type+"]: "+slotInfo("B")+"\n"+
+    "解説音ONタップ: "+(unlockTapped?"済":"未")+"\n"+
+    "最後の操作: "+lastYtOp;
+}
+if(DEBUG){ document.body.classList.add("dbg"); dbgRender(); setInterval(dbgRender,600); }
 </script>
 </body>
 </html>
