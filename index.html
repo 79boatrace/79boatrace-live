@@ -26,8 +26,9 @@
   .host, .host iframe { width:100%; height:100%; border:0; display:block; }
 
   /* ---- iPhone solo mode: one visual fills screen, the other plays hidden (audio only) ---- */
-  body.solo .slot.solo-hidden { position:absolute; left:-9999px; top:0; width:2px; height:2px;
-    opacity:0; pointer-events:none; overflow:hidden; }   /* rendered & playing, just off-screen */
+  /* keep the hidden source full-size & on-screen (transparent, behind) so iOS doesn't pause it */
+  body.solo .slot.solo-hidden { position:absolute; inset:0; opacity:0; pointer-events:none; z-index:0; }
+  body.solo #stage > .slot:not(.solo-hidden):not(.solo-blank) { z-index:1; }
   body.solo .slot.solo-blank  { display:none; }
 
   /* per-slot control bar */
@@ -82,6 +83,13 @@
   #start p { color:var(--sub); font-size:13px; max-width:360px; line-height:1.6; margin:0; }
   #start button { background:var(--accent); color:#04121f; border:0; border-radius:14px; padding:16px 40px;
     font-size:18px; font-weight:800; cursor:pointer; }
+  /* ---- tap-to-unlock-audio button (iOS) ---- */
+  #unlock { display:none; position:fixed; left:50%; bottom:calc(64px + env(safe-area-inset-bottom));
+    transform:translateX(-50%); z-index:30; background:var(--accent); color:#04121f; border:0;
+    border-radius:14px; padding:14px 26px; font-size:16px; font-weight:800; cursor:pointer;
+    box-shadow:0 6px 22px rgba(0,0,0,.5); animation:unlockPulse 1.4s ease-in-out infinite; }
+  #unlock:active { transform:translateX(-50%) scale(.96); }
+  @keyframes unlockPulse { 0%,100%{ box-shadow:0 6px 22px rgba(61,169,252,.35); } 50%{ box-shadow:0 6px 30px rgba(61,169,252,.85); } }
   .toast { position:fixed; left:50%; bottom:70px; transform:translateX(-50%); background:#04121f;
     border:1px solid var(--accent); color:var(--text); padding:9px 16px; border-radius:20px; font-size:13px;
     z-index:80; opacity:0; transition:opacity .2s; pointer-events:none; }
@@ -188,6 +196,8 @@
   <button id="startSettings" style="background:#0e121b;color:#e6e9ef;border:1px solid #2c3140;font-size:14px;padding:10px 22px;">⚙ 先に設定する</button>
 </div>
 
+<button id="unlock">🔊 解説の音を出す</button>
+
 <div class="toast" id="toast"></div>
 
 <script src="https://www.youtube.com/iframe_api"></script>
@@ -216,12 +226,14 @@ function defaultCfg(){
 }
 const IS_IPHONE = /iPhone|iPod/.test(navigator.userAgent);
 function effectiveSolo(){ return cfg.layout==="solo" || (cfg.layout==="auto" && IS_IPHONE); }
-// in solo: the visual slot is shown; the other slot is rendered (hidden) only if it carries audio
+// in solo: the visual slot is shown; the YouTube source stays alive (hidden) so a tap can unmute it
+// instantly (iOS only honours unMute() inside a user gesture, so we must NOT recreate it on switch).
 function slotRole(slot){
   if(!effectiveSolo()) return { render:true, hidden:false };
   const visual = (cfg.visual==="A"||cfg.visual==="B") ? cfg.visual : "A";
   if(slot===visual) return { render:true, hidden:false };
-  return { render:(cfg.audio===slot), hidden:true };  // off-screen audio source, else not rendered
+  const keepAlive = (cfg[slot].type==="youtube") || (cfg.audio===slot);
+  return { render:keepAlive, hidden:true };  // off-screen but playing (muted until armed)
 }
 function ytSlot(){ return cfg.A.type==="youtube" ? "A" : (cfg.B.type==="youtube" ? "B" : null); }
 function loadCfg(){
@@ -235,6 +247,8 @@ function shareURL(){ return location.origin+location.pathname+"#c="+encodeURICom
 let cfg = loadCfg();
 const ytPlayers = {};
 let ytApiReady = false, pendingRender = false;
+let audioArmed = true;   // solo/iOS: starts muted until the user taps to unlock sound
+let audioLive  = false;  // true once the intended audio source is confirmed playing with sound
 
 function ytId(input){
   if(!input) return "";
@@ -265,7 +279,7 @@ function boatcastSrc(stadium, audible){
 function renderSlot(slot){
   const host = document.getElementById("host"+slot);
   const s = cfg[slot];
-  const audible = (cfg.audio===slot);
+  const audible = (cfg.audio===slot) && audioArmed;
   if(ytPlayers[slot]){ try{ ytPlayers[slot].destroy(); }catch(e){} delete ytPlayers[slot]; }
   host.innerHTML = "";
 
@@ -336,26 +350,44 @@ function applyLayout(){
     document.querySelector('[data-mute="'+sl+'"]').textContent = (cfg.audio===sl)?"🔊":"🔇";
   });
   updateLagUI();
+  refreshUnlock();
 }
 
-function renderAll(){ renderSlot("A"); renderSlot("B"); applyLayout(); saveCfg(); }
+function renderAll(){ audioLive=false; renderSlot("A"); renderSlot("B"); applyLayout(); saveCfg(); }
+
+// Apply current cfg.audio to the LIVE players without recreating them.
+// MUST be reachable synchronously from a user tap so iOS honours the unMute.
+function applyAudio(){
+  let live=false;
+  ["A","B"].forEach(sl=>{
+    const audible=(cfg.audio===sl)&&audioArmed;
+    if(cfg[sl].type==="youtube"){ const p=ytPlayers[sl];
+      if(p){ try{ if(audible){ p.unMute(); p.setVolume(100); p.playVideo(); live=true; } else p.mute(); }catch(e){} } }
+    else { const f=document.querySelector("#host"+sl+" iframe");
+      if(f){ const w=boatcastSrc(cfg[sl].stadium,audible); if(f.src!==w) f.src=w; if(audible) live=true; } }
+  });
+  if(cfg.audio==="none") live=true;        // nothing to unlock
+  audioLive = audioArmed && live;          // false if the wanted player wasn't ready yet
+  refreshUnlock();
+}
+// Show the unlock button whenever sound is wanted (solo) but not yet confirmed playing.
+function refreshUnlock(){
+  document.getElementById("unlock").style.display =
+    (effectiveSolo() && cfg.audio!=="none" && !audioLive) ? "block" : "none";
+}
+// Called inside a real tap -> unlocks iOS audio for the current source.
+function armAudio(){ audioArmed=true; applyAudio(); applyLag(); }
 
 function toggleAudio(slot){
   cfg.audio = (cfg.audio===slot)?"none":slot;
-  // in solo, which slots get rendered depends on the audio source -> rebuild
-  if(effectiveSolo()){ renderAll(); return; }
-  ["A","B"].forEach(sl=>{
-    const audible=(cfg.audio===sl);
-    if(cfg[sl].type==="youtube" && ytPlayers[sl]){ try{ audible?ytPlayers[sl].unMute():ytPlayers[sl].mute(); }catch(e){} }
-    else if(cfg[sl].type==="boatcast"){ const f=document.querySelector("#host"+sl+" iframe");
-      if(f){ const w=boatcastSrc(cfg[sl].stadium,audible); if(f.src!==w) f.src=w; } }
-  });
-  applyLayout(); saveCfg();
+  audioArmed = true;                 // came from a tap
+  applyAudio(); applyLag(); applyLayout(); saveCfg();
 }
 // solo one-tap: switch which source you HEAR (解説 <-> ライブ映像). Visual stays the race.
 function flipAudio(){
   cfg.audio = (cfg.audio==="A") ? "B" : "A";
-  renderAll();
+  audioArmed = true;                 // came from a tap -> safe to unMute now
+  applyAudio(); applyLag(); applyLayout(); saveCfg();
 }
 function swap(){
   if(effectiveSolo()){ cfg.visual=(cfg.visual==="A")?"B":"A"; renderAll(); return; }
@@ -395,7 +427,7 @@ function bindSettings(){
   document.querySelectorAll('[data-audioseg] button').forEach(b=>b.onclick=()=>{ cfg.audio=b.dataset.audiosel; syncSettingsUI(); });
   document.querySelectorAll('[data-layoutseg] button').forEach(b=>b.onclick=()=>{ cfg.layout=b.dataset.layout; syncSettingsUI(); });
   document.querySelectorAll('[data-visualseg] button').forEach(b=>b.onclick=()=>{ cfg.visual=b.dataset.visualsel; syncSettingsUI(); });
-  document.getElementById("apply").onclick=()=>{ closeDrawer(); renderAll(); };
+  document.getElementById("apply").onclick=()=>{ closeDrawer(); startPlayback(); };
   document.getElementById("copyLink").onclick=copyShare;
 }
 function openDrawer(){ syncSettingsUI(); document.getElementById("drawer").classList.add("open"); }
@@ -426,8 +458,15 @@ document.getElementById("drawer").addEventListener("click",e=>{ if(e.target.id==
 document.querySelectorAll("[data-mute]").forEach(b=>b.onclick=()=>toggleAudio(b.dataset.mute));
 document.querySelectorAll("[data-swap]").forEach(b=>b.onclick=swap);
 
-function begin(){ document.getElementById("start").style.display="none"; renderAll(); }
+// (Re)build playback. In solo we start muted and require a tap to unlock sound (iOS);
+// in split/desktop the start click already counts as activation, so arm immediately.
+function startPlayback(){
+  audioArmed = !effectiveSolo();   // split/desktop: the start click already activates audio
+  renderAll();
+}
+function begin(){ document.getElementById("start").style.display="none"; startPlayback(); }
 document.getElementById("startBtn").onclick=begin;
+document.getElementById("unlock").onclick=armAudio;
 
 // iPhone: explain the solo behaviour on the start screen
 if(effectiveSolo()){
