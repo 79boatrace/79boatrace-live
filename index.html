@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>79BOATRACE</title>
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0d0f14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="79BOATRACE">
+<style>
+  :root { --bg:#0d0f14; --panel:#1a1d26; --line:#2c3140; --accent:#3da9fc; --text:#e6e9ef; --sub:#9aa3b2; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--text);
+    font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif; overflow:hidden; }
+
+  /* ---- stage: two equal panels, fill the screen ---- */
+  #stage { position:fixed; left:0; right:0; top:0; bottom:0; display:flex; flex-direction:column;
+    gap:4px; background:var(--line); }
+  @media (orientation:landscape){ #stage { flex-direction:row; } }
+  .slot { flex:1 1 0; position:relative; min-width:0; min-height:0; background:#000; overflow:hidden; }
+  .host, .host iframe { width:100%; height:100%; border:0; display:block; }
+
+  /* per-slot control bar */
+  .bar { position:absolute; left:0; right:0; bottom:0; display:flex; gap:6px; align-items:center;
+    padding:5px 8px; background:linear-gradient(transparent,rgba(0,0,0,.62)); z-index:6; pointer-events:none; }
+  .bar .label { font-size:11px; color:var(--text); flex:1; white-space:nowrap; overflow:hidden;
+    text-overflow:ellipsis; text-shadow:0 1px 2px #000; }
+  .bar button { pointer-events:auto; background:rgba(20,24,33,.85); color:var(--text); border:1px solid var(--line);
+    border-radius:7px; font-size:14px; padding:6px 9px; line-height:1; cursor:pointer; }
+  .bar button:active { transform:scale(.94); }
+
+  /* ---- bottom toolbar ---- */
+  #toolbar { position:fixed; left:50%; transform:translateX(-50%); bottom:calc(8px + env(safe-area-inset-bottom));
+    z-index:20; display:flex; gap:8px; padding:0; }
+  #toolbar button { background:rgba(26,29,38,.92); color:var(--text); border:1px solid var(--line); border-radius:10px;
+    padding:9px 14px; font-size:13px; font-weight:600; cursor:pointer; backdrop-filter:blur(4px); }
+  #toolbar button:active { transform:scale(.96); }
+
+  /* ---- settings drawer ---- */
+  #drawer { position:fixed; inset:0; z-index:40; background:rgba(0,0,0,.55); display:none; }
+  #drawer.open { display:block; }
+  #panel { position:absolute; left:0; top:0; bottom:0; width:min(440px,92vw); background:var(--panel);
+    padding:16px; overflow-y:auto; box-shadow:4px 0 24px rgba(0,0,0,.5); }
+  #panel h2 { margin:2px 0 14px; font-size:17px; }
+  .card { border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:14px; background:#141822; }
+  .card h3 { margin:0 0 10px; font-size:14px; color:var(--accent); }
+  .row { display:flex; align-items:center; gap:8px; margin:8px 0; flex-wrap:wrap; }
+  .row label.k { font-size:12px; color:var(--sub); min-width:64px; }
+  select,input[type=text] { background:#0e121b; color:var(--text); border:1px solid var(--line);
+    border-radius:8px; padding:9px; font-size:14px; flex:1; min-width:120px; }
+  .seg { display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  .seg button { flex:1; background:#0e121b; color:var(--sub); border:0; padding:9px; font-size:13px; cursor:pointer; }
+  .seg button.on { background:var(--accent); color:#04121f; font-weight:700; }
+  .hint { font-size:11px; color:var(--sub); line-height:1.5; margin:6px 0 0; }
+  .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+  .actions button { flex:1; min-width:120px; background:var(--accent); color:#04121f; border:0; border-radius:10px;
+    padding:12px; font-size:14px; font-weight:700; cursor:pointer; }
+  .actions button.ghost { background:#0e121b; color:var(--text); border:1px solid var(--line); }
+  .yt-only,.bc-only { display:none; }
+  .type-youtube .yt-only { display:flex; }
+  .type-boatcast .bc-only { display:flex; }
+
+  /* ---- start overlay ---- */
+  #start { position:fixed; inset:0; z-index:60; background:rgba(8,10,15,.94); display:flex;
+    flex-direction:column; align-items:center; justify-content:center; gap:18px; text-align:center; padding:24px; }
+  #start h1 { font-size:20px; margin:0; }
+  #start p { color:var(--sub); font-size:13px; max-width:360px; line-height:1.6; margin:0; }
+  #start button { background:var(--accent); color:#04121f; border:0; border-radius:14px; padding:16px 40px;
+    font-size:18px; font-weight:800; cursor:pointer; }
+  .toast { position:fixed; left:50%; bottom:70px; transform:translateX(-50%); background:#04121f;
+    border:1px solid var(--accent); color:var(--text); padding:9px 16px; border-radius:20px; font-size:13px;
+    z-index:80; opacity:0; transition:opacity .2s; pointer-events:none; }
+  .toast.show { opacity:1; }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <div class="slot" id="wrapA"><div class="host" id="hostA"></div>
+    <div class="bar"><span class="label" id="labelA">A</span>
+      <button data-mute="A" title="音声">🔊</button>
+      <button data-swap title="上下入れ替え">⇅</button>
+    </div></div>
+  <div class="slot" id="wrapB"><div class="host" id="hostB"></div>
+    <div class="bar"><span class="label" id="labelB">B</span>
+      <button data-mute="B" title="音声">🔊</button>
+      <button data-swap title="上下入れ替え">⇅</button>
+    </div></div>
+</div>
+
+<div id="toolbar">
+  <button id="btnSettings">⚙ 設定</button>
+  <button id="btnSwap">⇅ 入替</button>
+  <button id="btnShare">🔗 共有</button>
+</div>
+
+<div id="drawer"><div id="panel">
+  <h2>2画面ビューア 設定</h2>
+
+  <div class="card type-boatcast" id="cardA">
+    <h3>ソース A</h3>
+    <div class="row"><label class="k">種類</label>
+      <div class="seg" data-typeseg="A">
+        <button data-type="boatcast">レース映像</button>
+        <button data-type="youtube">YouTube</button>
+      </div>
+    </div>
+    <div class="row bc-only"><label class="k">レース場</label><select data-stadium="A"></select></div>
+    <div class="row yt-only"><label class="k">YouTube</label><input type="text" data-yt="A" placeholder="URL または 動画ID"></div>
+  </div>
+
+  <div class="card type-youtube" id="cardB">
+    <h3>ソース B</h3>
+    <div class="row"><label class="k">種類</label>
+      <div class="seg" data-typeseg="B">
+        <button data-type="boatcast">レース映像</button>
+        <button data-type="youtube">YouTube</button>
+      </div>
+    </div>
+    <div class="row bc-only"><label class="k">レース場</label><select data-stadium="B"></select></div>
+    <div class="row yt-only"><label class="k">YouTube</label><input type="text" data-yt="B" placeholder="URL または 動画ID"></div>
+  </div>
+
+  <div class="card">
+    <h3>表示と音声</h3>
+    <div class="row"><label class="k">上に表示</label>
+      <div class="seg" data-topseg>
+        <button data-topsel="A">A を上</button>
+        <button data-topsel="B">B を上</button>
+      </div>
+    </div>
+    <div class="row"><label class="k">音を出す</label>
+      <div class="seg" data-audioseg>
+        <button data-audiosel="A">A の音</button>
+        <button data-audiosel="B">B の音</button>
+        <button data-audiosel="none">両方ミュート</button>
+      </div>
+    </div>
+    <p class="hint">※ 縦持ち=上下2分割／横持ち=左右2分割。各動画は枠いっぱいまで拡大し、余白は枠色で埋めます。<br>※ ラグ合わせ: レース映像のシークバーを左へドラッグ（最大約4.7時間巻き戻し）。YouTubeの遅延ぶん戻すと同期します。</p>
+  </div>
+
+  <div class="actions">
+    <button id="apply">適用して再生</button>
+    <button class="ghost" id="copyLink">🔗 共有リンクをコピー</button>
+  </div>
+  <p class="hint">「共有リンク」を別の人に渡すと、同じ設定（相手のYouTube＋好きな場など）でそのまま開けます。</p>
+</div></div>
+
+<div id="start">
+  <img src="icon-192.png" alt="79BOATRACE" width="92" height="92" style="border-radius:18px;background:#fff;">
+  <h1>79BOATRACE</h1>
+  <p>レース映像（BOATCAST公式）と YouTube を、上下（横持ちは左右）2分割で同時再生します。<br>設定を確認して「再生」を押してください。</p>
+  <button id="startBtn">▶ 再生</button>
+  <button id="startSettings" style="background:#0e121b;color:#e6e9ef;border:1px solid #2c3140;font-size:14px;padding:10px 22px;">⚙ 先に設定する</button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://www.youtube.com/iframe_api"></script>
+<script>
+"use strict";
+
+const VENUES = [
+  ["01kiryu","桐生"],["02toda","戸田"],["03edogawa","江戸川"],["04heiwajima","平和島"],
+  ["05tamagawa","多摩川"],["06hamanako","浜名湖"],["07gamagori","蒲郡"],["08tokoname","常滑"],
+  ["09tsu","津"],["10mikuni","三国"],["11biwako","びわこ"],["12suminoe","住之江"],
+  ["13amagasaki","尼崎"],["14naruto","鳴門"],["15marugame","丸亀"],["16kojima","児島"],
+  ["17miyajima","宮島"],["18tokuyama","徳山"],["19shimonoseki","下関"],["20wakamatsu","若松"],
+  ["21ashiya","芦屋"],["22fukuoka","福岡"],["23karatsu","唐津"],["24omura","大村"]
+];
+
+function defaultCfg(){
+  return {
+    top:"A",             // which slot is on top (or left in landscape)
+    audio:"B",           // "A" | "B" | "none"
+    A:{ type:"boatcast", stadium:"14naruto", yt:"" },
+    B:{ type:"youtube",  stadium:"14naruto", yt:"" }
+  };
+}
+function loadCfg(){
+  try{ const h=location.hash.match(/[#&]c=([^&]+)/); if(h) return Object.assign(defaultCfg(),JSON.parse(decodeURIComponent(h[1]))); }catch(e){}
+  try{ const s=localStorage.getItem("racePipCfg"); if(s) return Object.assign(defaultCfg(),JSON.parse(s)); }catch(e){}
+  return defaultCfg();
+}
+function saveCfg(){ try{ localStorage.setItem("racePipCfg",JSON.stringify(cfg)); }catch(e){} }
+function shareURL(){ return location.origin+location.pathname+"#c="+encodeURIComponent(JSON.stringify(cfg)); }
+
+let cfg = loadCfg();
+const ytPlayers = {};
+let ytApiReady = false, pendingRender = false;
+
+function ytId(input){
+  if(!input) return "";
+  input = input.trim();
+  if(/^[A-Za-z0-9_-]{11}$/.test(input)) return input;
+  const m = input.match(/(?:v=|\/live\/|\/embed\/|youtu\.be\/|\/shorts\/)([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : "";
+}
+
+function ytError(slot, id, code){
+  const host = document.getElementById("host"+slot);
+  const fileMsg = (location.protocol==="file:")
+    ? "<b>file:// で開いています。</b><br>YouTubeはオリジンが必要です。http:// か https:// で開き直してください。<br><br>"
+    : "この動画は埋め込み再生できない設定の可能性があります（YouTube Studioで「埋め込みを許可」を確認）。<br><br>";
+  host.innerHTML = '<div style="color:#e6e9ef;display:flex;flex-direction:column;height:100%;'
+    + 'align-items:center;justify-content:center;font-size:12px;padding:14px;text-align:center;line-height:1.6;background:#111722;">'
+    + '⚠️ YouTube再生エラー (code ' + code + ')<br><br>' + fileMsg
+    + '<a href="https://www.youtube.com/watch?v=' + id + '" target="_blank" '
+    + 'style="color:#3da9fc;border:1px solid #3da9fc;border-radius:8px;padding:8px 14px;text-decoration:none;">YouTubeで開く</a></div>';
+}
+
+function boatcastSrc(stadium, audible){
+  return "https://front.player.boatrace-cdn.jp/player/live"
+    + "?service=boatcast&sourceType=mix&stadium=" + encodeURIComponent(stadium)
+    + "&bitrate=low&dvr=1&autoplay=1&volume=" + (audible?"1":"0");
+}
+
+function renderSlot(slot){
+  const host = document.getElementById("host"+slot);
+  const s = cfg[slot];
+  const audible = (cfg.audio===slot);
+  if(ytPlayers[slot]){ try{ ytPlayers[slot].destroy(); }catch(e){} delete ytPlayers[slot]; }
+  host.innerHTML = "";
+
+  if(s.type==="youtube"){
+    const id = ytId(s.yt);
+    document.getElementById("label"+slot).textContent = "YouTube";
+    if(!id){ host.innerHTML='<div style="color:#9aa3b2;display:flex;height:100%;align-items:center;justify-content:center;font-size:13px;padding:12px;text-align:center;">⚙設定でYouTubeのURL/IDを入力してください</div>'; return; }
+    const div=document.createElement("div"); div.id="yt-"+slot; div.style.width="100%"; div.style.height="100%"; host.appendChild(div);
+    const make=()=>{
+      const pv={ autoplay:1, playsinline:1, mute: audible?0:1, rel:0, modestbranding:1 };
+      if(location.protocol==="http:"||location.protocol==="https:") pv.origin=location.origin;
+      ytPlayers[slot]=new YT.Player("yt-"+slot,{ videoId:id, playerVars:pv,
+        events:{ onReady:(e)=>{ audible?e.target.unMute():e.target.mute(); e.target.playVideo(); },
+                 onError:(e)=>ytError(slot,id,e.data) }});
+    };
+    ytApiReady ? make() : (pendingRender=true);
+  } else {
+    const f=document.createElement("iframe");
+    f.allow="autoplay; encrypted-media; picture-in-picture; fullscreen";
+    f.setAttribute("allowfullscreen","");
+    f.src=boatcastSrc(s.stadium,audible);
+    host.appendChild(f);
+    const vn=(VENUES.find(v=>v[0]===s.stadium)||["",""])[1];
+    document.getElementById("label"+slot).textContent="レース映像・"+vn;
+  }
+}
+
+function applyLayout(){
+  // top slot first (flex order). landscape => left.
+  document.getElementById("wrapA").style.order = (cfg.top==="A")?0:1;
+  document.getElementById("wrapB").style.order = (cfg.top==="B")?0:1;
+  ["A","B"].forEach(sl=>{
+    document.querySelector('[data-mute="'+sl+'"]').textContent = (cfg.audio===sl)?"🔊":"🔇";
+  });
+}
+
+function renderAll(){ renderSlot("A"); renderSlot("B"); applyLayout(); saveCfg(); }
+
+function toggleAudio(slot){
+  cfg.audio = (cfg.audio===slot)?"none":slot;
+  ["A","B"].forEach(sl=>{
+    const audible=(cfg.audio===sl);
+    if(cfg[sl].type==="youtube" && ytPlayers[sl]){ try{ audible?ytPlayers[sl].unMute():ytPlayers[sl].mute(); }catch(e){} }
+    else if(cfg[sl].type==="boatcast"){ const f=document.querySelector("#host"+sl+" iframe");
+      if(f){ const w=boatcastSrc(cfg[sl].stadium,audible); if(f.src!==w) f.src=w; } }
+  });
+  applyLayout(); saveCfg();
+}
+function swap(){ cfg.top=(cfg.top==="A")?"B":"A"; applyLayout(); saveCfg(); }
+
+// ---- settings UI ----
+function buildVenueSelects(){
+  ["A","B"].forEach(slot=>{
+    document.querySelector('[data-stadium="'+slot+'"]').innerHTML =
+      VENUES.map(v=>'<option value="'+v[0]+'">'+v[1]+'</option>').join("");
+  });
+}
+function syncSettingsUI(){
+  ["A","B"].forEach(slot=>{
+    const s=cfg[slot];
+    document.getElementById("card"+slot).className="card type-"+s.type;
+    document.querySelectorAll('[data-typeseg="'+slot+'"] button').forEach(b=>b.classList.toggle("on",b.dataset.type===s.type));
+    document.querySelector('[data-stadium="'+slot+'"]').value=s.stadium;
+    document.querySelector('[data-yt="'+slot+'"]').value=s.yt;
+  });
+  document.querySelectorAll('[data-topseg] button').forEach(b=>b.classList.toggle("on",b.dataset.topsel===cfg.top));
+  document.querySelectorAll('[data-audioseg] button').forEach(b=>b.classList.toggle("on",b.dataset.audiosel===cfg.audio));
+}
+function bindSettings(){
+  buildVenueSelects();
+  document.querySelectorAll('[data-typeseg]').forEach(seg=>{
+    seg.querySelectorAll("button").forEach(b=>b.onclick=()=>{ cfg[seg.dataset.typeseg].type=b.dataset.type; syncSettingsUI(); });
+  });
+  ["A","B"].forEach(slot=>{
+    document.querySelector('[data-stadium="'+slot+'"]').onchange=e=>cfg[slot].stadium=e.target.value;
+    document.querySelector('[data-yt="'+slot+'"]').oninput=e=>cfg[slot].yt=e.target.value;
+  });
+  document.querySelectorAll('[data-topseg] button').forEach(b=>b.onclick=()=>{ cfg.top=b.dataset.topsel; syncSettingsUI(); });
+  document.querySelectorAll('[data-audioseg] button').forEach(b=>b.onclick=()=>{ cfg.audio=b.dataset.audiosel; syncSettingsUI(); });
+  document.getElementById("apply").onclick=()=>{ closeDrawer(); renderAll(); };
+  document.getElementById("copyLink").onclick=copyShare;
+}
+function openDrawer(){ syncSettingsUI(); document.getElementById("drawer").classList.add("open"); }
+function closeDrawer(){ document.getElementById("drawer").classList.remove("open"); }
+
+let toastT;
+function toast(msg){ const t=document.getElementById("toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("show"),1800); }
+function copyShare(){
+  const url=shareURL();
+  history.replaceState(null,"","#c="+encodeURIComponent(JSON.stringify(cfg)));
+  if(navigator.clipboard) navigator.clipboard.writeText(url).then(()=>toast("共有リンクをコピーしました"),()=>toast(url));
+  else toast(url);
+}
+
+window.onYouTubeIframeAPIReady=function(){
+  ytApiReady=true;
+  if(pendingRender){ pendingRender=false; ["A","B"].forEach(sl=>{ if(cfg[sl].type==="youtube") renderSlot(sl); }); applyLayout(); }
+};
+
+document.getElementById("btnSettings").onclick=openDrawer;
+document.getElementById("startSettings").onclick=openDrawer;
+document.getElementById("btnSwap").onclick=swap;
+document.getElementById("btnShare").onclick=copyShare;
+document.getElementById("drawer").addEventListener("click",e=>{ if(e.target.id==="drawer") closeDrawer(); });
+document.querySelectorAll("[data-mute]").forEach(b=>b.onclick=()=>toggleAudio(b.dataset.mute));
+document.querySelectorAll("[data-swap]").forEach(b=>b.onclick=swap);
+
+function begin(){ document.getElementById("start").style.display="none"; renderAll(); }
+document.getElementById("startBtn").onclick=begin;
+
+bindSettings();
+</script>
+</body>
+</html>
