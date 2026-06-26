@@ -54,6 +54,11 @@
 - 恒久対応(証明書再発行): Settings→Pages でカスタムドメインを一旦消して保存→再入力して保存→
   発行後に「Enforce HTTPS」をON。通常数分〜最大24h。CAA等のブロックは未確認だが標準構成。
 
+## PROJECT_SUMMARY.md（引き継ぎ資料）
+- リポジトリ内 `PROJECT_SUMMARY.md` を作成・push済み（2026-06-26）。
+- 用途: ChatGPTや別セッションにプロジェクト全体像を渡すための引き継ぎ読み物。
+- 開発用の本ファイル(`project_race_pip_viewer.md`)＝作業正本、`PROJECT_SUMMARY.md`＝対外まとめ、の住み分け。
+
 ## 2026-06-26 の作業（このセッション）
 ### 追加: デバッグ表示（`?debug=1` または URLに `#debug`）
 - 画面左上に小さく以下を常時表示（通常時は非表示）:
